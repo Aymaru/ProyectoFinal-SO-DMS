@@ -1,0 +1,122 @@
+------------------------------------------------------------------------------------------------------------------
+	SO - Proyecto 2 — Memoria Distribuida Compartida (versión simple) - DSM v.0.1
+------------------------------------------------------------------------------------------------------------------
+
+
+	Introducción
+-----------------------------------
+
+En este proyecto se desarrolla la versión básica de un administrador de Memoria Distribuida Compartida (DSM) basado en páginas que permitirá que un conjunto de procesos localizados en una colección de máquinas Linux, compartan páginas de memoria. La consistencia se logrará con un protocolo sencillo de Multiple-Readers / Single-Writer y una política de write-invalidate. 
+
+Toda la programación debe realizarse en C sobre Linux, únicamente. En particular, el proyecto debe ejecutar correctamente en los laboratorios de la Escuela. 
+
+
+	Estructura General
+----------------------------------------
+
+El proyecto consta de 3 componentes principales:
+
+1. Un administrador central de DSM (al que llamaremos el asignador), que es la autoridad central responsable de la administración de los derechos de acceso a páginas de memoria compartida. Éste será implementado como un proceso independiente.
+
+2. Una biblioteca de funciones de DSM. Todos los clientes del DSM usarán esta biblioteca y se ejecutarán en un conjunto de nodos del DSM. 
+
+3. Un par de aplicaciones sencillas que corran simultáneamente en varios nodos del laboratorio, los cuales se comunicarán usando el DSM. Al arranque, cada nodo debe registrarse con el asignador. 
+
+Usando las funciones disponibles en la biblioteca de DSM (que usted debe implementar), los programas de aplicación podrán crear objetos en memoria compartida. Las direcciones de dichos objetos son válidas en todos los nodos, ya que cada página de DSM es mapeada a la misma dirección virtual en todos los nodos. Esto permite que los nodos intercambien direcciones que refieran a los mismos objetos en memoria compartida. Las páginas donde estos objetos son colocados serán controladas y rastreadas en forma centralizada por el asignador siguiendo un protocolo de Multiple-Readers / Single-Writer. 
+
+Cuando se dé un read o write fault en cualquier nodo que trate de usar una página del DSM, el nodo específico contacta al asignador, el cual, dependiendo del tipo de fault, proporcionará una copia de la página con derechos read-only o con derechos de escritura (en este último caso, el asignador deberá invalidar las otras copias que haya de la página solicitada). 
+
+Es indispensable que al ejecutar una aplicación haya una copia idéntica del código disponible para todos los nodos involucrados en el DSM (lo cual se consigue fácilmente en nuestra red en los laboratorios de la Escuela mediante el uso de NFS), debido a esto se aconseja utilizar sus cuentas @ic-itcr.ac.cr para trabjar en los labs y correr sus proyectos en las computadoras del laboratorio. Nótese que al usar un administrador central como asignador, se puede estar limitando la escalabilidad del DSM, pero su implementación resulta más simple.
+
+
+	Usando el DSM
+-----------------------------------
+
+Las aplicaciones DSM se ejecutarán a través del programa dsm de esta manera: 
+
+	dsm [OPTIONS] ... Executable-File Node-Option ... 
+	-H HOSTFILE		archivo con lista de máquinas
+	-l LOGFILE		bitácora de todas las acciones realizadas por el dsm
+	-n N				crear N copias del proceso
+
+Este comando arranca la ejecución del dsm, quien a su vez manda a ejecutar N copias (o una sola copia si no se usa la opción -n) de Executable-File en las máquinas indicadas en HOSTFILE. A cada ejecución se le pasan los argumentos Node-Option. El ejecutable tiene que haberse ligado con la biblioteca DSM preparada por usted. Después de esto. el programa dsm se convierte en el asignador. 
+
+HOSTFILE es un archivo de texto donde cada línea contiene un nombre de máquina. Los N procesos serán mapeados a estas máquinas: la primer copia en la primer máquina, la segunda copia en la segunda máquina y así sucesivamente. Si N fuese mayor que la cantidad de máquinas registradas, el mapeo regresa a la primer máquina y continúa asignando nodos en el orden de HOSTFILE. Si no se da la opción -H, se buscará el archivo /etc/hosts. Si el archivo no existe o si está vacío las N copias se ejecutarán en "localhost".
+
+
+	Biblioteca DSM (API)
+----------------------------------------
+
+Este API define la funcionalidad básica inicial del DSM. Eventualmente, se podrán agregar otras funciones. De momento, se pueden asignar áreas de memoria compartida y hacer sincronización de barreras.
+
+	int DSM_node_init (int *argc, char **argv[], int *nodes, int *nid);
+
+	Esta función inscribe un nodo con el asignador, regresa 0 si es exitoso, -1 en caso de error. Se le pasan todos los argumentos de la línea de comando, al regresar se habrán removido todos los argumentos relacionados al DSM. El número total de procesos y una identificación única para el proceso que se inscribe, se regresan en nodes y nid, respectivamente. 
+
+
+	void *DSM_node_exit (void);
+
+	Desinscribe un nodo del asignador 
+
+
+	void *DSM_malloc (size_t size);
+
+	Crea un objeto de tamaño "size" en el DSM, Regresa la dirección del objeto si es exitoso, NULL en caso de error. 
+
+
+	void DSM_barrier (void);
+
+	Sincronización de barrera. Cada proceso que lo ejecute queda bloqueado hasta que los N procesos hayan llegado a este punto. Comportamiento impredecible si algún proceso ha ejecutado DSM_node_exit().
+
+
+	Puede implementar otras funciones de biblioteca para su API según lo requiera. Deberá documentar con detalle cada una de ellas. 
+
+
+
+	Programa de Aplicación
+--------------------------------------------
+
+Tiene que desarrollar un par de pequeños programas de aplicación que pongan a prueba su sistema de DSM. Cada grupo deberá trabajar ejemplos de programas diferentes. 
+
+
+
+	Generalidades
+-----------------------------------
+
+- use sockets para la comunicación entre los nodos y el asignador
+- toda la comunicación pasa a través del asignador (los nodos nunca se comunican directamente)
+- verifique que todo el sistema termine limpiamente, no deje procesos huérfanos, cierre todos los sockets, etc.
+- lo anterior debe darse incluso en caso de falla de alguno de los procesos
+- este proyecto requiere una buena comunicación entre los procesos, se sugiere el uso de signals del sistema Linux; consulte el capítulo 11 del libro Beginning Linux Programming, sobre el tema de señales, y los otros capítulos pueden serle útiles para las implementaciones; maneje EINTR apropiadamente
+- use mmap() y mprotect() para asignar memoria compartida y para cambiar los derechos de acceso
+- use getpagesize() para obtener el tamaño de página
+- note que el asignador es esencialmente un servidor que espera requests de los nodos. Los nodos no puede estar diseñados siguiendo una arquitectura cliente/servidor: deben manejar mensajes asincrónicos del asignador. Investigue comunicación asincrónica de sockets
+- use sigaction() en los nodos para registrar handlers que atrapen los segmentation faults (los causados por el uso del DSM o por errores de programación) y para capturar signals debidos  comunicación asincrónica con el asignador
+- todos los programas deben ser robustos y considerar múltiples combinaciones de eventos. 
+
+
+
+	Observaciones:
+-------------------------------------
+
++ Trabajo en parejas de DOS máximo.
++ El programa debe estar completamente desarrollado en C con GCC y sobre Linux, únicamente. 
++ Todos los programas deben correr exclusivamente en las máquinas de los laboratorios de la Escuela, únicamente.
+
++ Realizar un documento técnico que explique la solución y su implementación de forma muy detallada con: estructuras de datos, protocolos implementado, detalles de las funciones implementadas, diagrama de la arquitectura, mensajes usados y mecanismos de comunicación y sincronización, etc. explicando ampliamente todas las partes. El código debe venir como Apéndices, debidamente documentado y explicado.
+
++ Debe utilizar el servidor Git de la Escuela para su desarrollo.
+
++ Debe entregar el documento técnico en PDF así como todo el código fuente creado, en archivos de texto adjuntos. La documentación en LaTeX valdrá 5pts extra, entregando su archivo fuente asociado y el PDF. 
+
+
+
+	Entrega
+-----------------------------------
+
+
++ Se entrega en digital al correo: earias@ic-itcr.ac.cr
+
++ Fecha de Entrega: Viernes 22 Noviembre, mediante citas de revisión durante el día
+
++ Usar el Subject: SO - DSM - Nombre1Apellido1, Nombre2Apellido2
