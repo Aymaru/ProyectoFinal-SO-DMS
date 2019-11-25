@@ -19,7 +19,7 @@ int main(){
 	int cliente_socket;
 	cliente_socket = accept(server_socket,NULL,NULL);
 	send(cliente_socket,server_message,sizeof(server_message),0);
-	close(server_socket);
+	pclose(server_socket);
         return 0;
 }
 
